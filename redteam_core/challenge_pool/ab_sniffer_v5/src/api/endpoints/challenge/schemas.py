@@ -89,8 +89,22 @@ class MinerOutput(BaseModel):
         return val
 
 
+class DetectionResultPM(BaseModel):
+    botasaurus: bool
+    camoufox: bool
+    nodriver: bool
+    patchright: bool
+    puppeteerextra: bool
+    pydoll: bool
+    seleniumbase: bool
+    seleniumdriverless: bool
+    zendriver: bool
+    human: bool
+
+
 __all__ = [
     "MinerInput",
     "DetectionFilePM",
     "MinerOutput",
+    "DetectionResultPM",
 ]

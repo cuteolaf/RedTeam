@@ -4,7 +4,6 @@ import random
 import threading
 import subprocess
 
-import docker
 from docker import DockerClient
 from docker.types import Ulimit
 from docker.models.networks import Network
@@ -67,10 +66,9 @@ def run_bot_container(
     network_name: str = "framework_network",
     ulimit: int = 32768,
     **kwargs,
-) -> str:
+) -> None:
     logger.info(f"Running {image_name} docker container...")
 
-    _detected_driver = ""
     try:
         # Network setup from the provided function
         _networks = docker_client.networks.list(names=[network_name])
@@ -102,86 +100,88 @@ def run_bot_container(
         _ulimit_nofile = Ulimit(name="nofile", soft=ulimit, hard=ulimit)
 
         # Generate a temporary container ID for this run
-        _container_id = f"run_{int(time.time())}"
-        _log_path = f"/tmp/driver_type_{_container_id}.txt"
-        _web_url = f"http://{_gateway_ip}:{config.api.port}/_web"
+        # _container_id = f"run_{int(time.time())}"
+        # _log_path = f"/tmp/driver_type_{_container_id}.txt"
+        # _web_url = f"http://{_gateway_ip}:{config.api.port}/_web"
 
         # Mount volume for easier file access
-        volumes = {"/tmp": {"bind": "/host_tmp", "mode": "rw"}}
+        # volumes = {"/tmp": {"bind": "/host_tmp", "mode": "rw"}}
 
         # Run the container
-
         _container = docker_client.containers.run(
             image=image_name,
             name=container_name,
             ulimits=[_ulimit_nofile],
-            environment={
-                "ABS_WEB_URL": _web_url,
-                "CONTAINER_ID": _container_id,
-                "DETECTED_DRIVER_PATH": _log_path,
-                "HOST_DRIVER_PATH": f"/host_tmp/driver_type_{_container_id}.txt",
-            },
-            volumes=volumes,
+            # environment={
+            #     "ABS_WEB_URL": _web_url,
+            #     "CONTAINER_ID": _container_id,
+            #     "DETECTED_DRIVER_PATH": _log_path,
+            #     "HOST_DRIVER_PATH": f"/host_tmp/driver_type_{_container_id}.txt",
+            # },
+            # volumes=volumes,
             network=network_name,
             detach=True,
             **kwargs,
         )
 
         # Stream container logs
-        log_thread = threading.Thread(target=stream_container_logs, args=(_container,))
-        log_thread.daemon = True
-        log_thread.start()
+        _log_thread = threading.Thread(
+            target=_stream_container_logs, args=(_container,)
+        )
+        _log_thread.daemon = True
+        _log_thread.start()
 
-        # Poll for driver type file (both inside container and in host-mounted volume)
-        _poll_timeout = 60  # Longer timeout
-        _poll_interval = 2  # Seconds
-        _elapsed = 0
+        # # Poll for driver type file (both inside container and in host-mounted volume)
+        # _poll_timeout = 60  # Longer timeout
+        # _poll_interval = 2  # Seconds
+        # _elapsed = 0
 
-        while _elapsed < _poll_timeout:
-            # Check host-mounted file first
-            host_driver_path = f"/tmp/driver_type_{_container_id}.txt"
-            if os.path.exists(host_driver_path):
-                try:
-                    with open(host_driver_path, "r") as f:
-                        detected_driver = f.read().strip()
-                        if detected_driver:  # Ensure we have a non-empty result
-                            logger.info(
-                                f"Driver type found in host volume: {detected_driver}"
-                            )
-                            break
-                        else:
-                            logger.warning(
-                                "Empty driver type file found in host volume"
-                            )
-                except Exception as e:
-                    logger.warning(f"Error reading host driver file: {str(e)}")
+        # while _elapsed < _poll_timeout:
+        #     # Check host-mounted file first
+        #     host_driver_path = f"/tmp/driver_type_{_container_id}.txt"
+        #     if os.path.exists(host_driver_path):
+        #         try:
+        #             with open(host_driver_path, "r") as f:
+        #                 detected_driver = f.read().strip()
+        #                 if detected_driver:  # Ensure we have a non-empty result
+        #                     logger.info(
+        #                         f"Driver type found in host volume: {detected_driver}"
+        #                     )
+        #                     break
+        #                 else:
+        #                     logger.warning(
+        #                         "Empty driver type file found in host volume"
+        #                     )
+        #         except Exception as e:
+        #             logger.warning(f"Error reading host driver file: {str(e)}")
 
-            # Update container status
-            _container.reload()
+        #     # Update container status
+        #     _container.reload()
 
-            logger.info(f"Driver type not found, retrying... ({_elapsed}s)")
-            time.sleep(_poll_interval)
-            _elapsed += _poll_interval
+        #     logger.info(f"Driver type not found, retrying... ({_elapsed}s)")
+        #     time.sleep(_poll_interval)
+        #     _elapsed += _poll_interval
 
         # Clean up
         _container.stop()
+
         # ~ TODO: We need to stop the container not remove it
-        _container.remove(force=True)
+        # _container.remove(force=True)
         logger.info(f"Successfully ran {image_name} docker container.")
 
-    except Exception as err:
-        logger.error(f"Failed to run {image_name} docker: {str(err)}!")
+    except Exception:
+        logger.error(f"Failed to run {image_name} docker!")
         raise
 
-    return _detected_driver
+    return
 
 
-def stream_container_logs(container):
+def _stream_container_logs(container):
     try:
-        for log in container.logs(stream=True):
-            logger.info(log.decode().strip())
-    except Exception as e:
-        logger.error(f"Error streaming logs: {e}")
+        for _log in container.logs(stream=True):
+            logger.info(_log.decode().strip())
+    except Exception as err:
+        logger.error(f"Error streaming logs: {err}")
 
 
 @validate_call
@@ -202,8 +202,8 @@ def stop_container(container_name: str = "detector_container") -> None:
 
 
 __all__ = [
+    "gen_framework_sequence",
     "copy_detection_files",
     "run_bot_container",
     "stop_container",
-    "gen_framework_sequence",
 ]

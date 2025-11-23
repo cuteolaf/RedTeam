@@ -1,10 +1,15 @@
 from fastapi import APIRouter, Request, HTTPException, Body, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from api.core.constants import ErrorCodeEnum
+from api.core.schemas import BaseResPM
+from api.core.responses import BaseResponse
+from api.core.exceptions import BaseHTTPException
 from api.core.dependencies.auth import auth_api_key
-from api.endpoints.challenge.schemas import MinerInput, MinerOutput
-from api.endpoints.challenge import service
 from api.logger import logger
+
+from .schemas import MinerInput, MinerOutput, DetectionResultPM
+from . import service
 
 
 router = APIRouter(tags=["Challenge"])
@@ -25,16 +30,16 @@ def get_task(request: Request):
     _miner_input: MinerInput
     try:
         _miner_input = service.get_task()
-
         logger.success(f"[{_request_id}] - Successfully got the task.")
-    except Exception as err:
-        if isinstance(err, HTTPException):
-            raise
 
-        logger.error(
-            f"[{_request_id}] - Failed to get task!",
-        )
+    except HTTPException:
         raise
+    except Exception:
+        logger.exception(f"[{_request_id}] - Failed to get task!")
+        raise BaseHTTPException(
+            error_enum=ErrorCodeEnum.INTERNAL_SERVER_ERROR,
+            message="Failed to get task!",
+        )
 
     return _miner_input
 
@@ -44,33 +49,30 @@ def get_task(request: Request):
     summary="Score",
     description="This endpoint score miner output.",
     response_class=JSONResponse,
-    responses={400: {}, 422: {}, 401: {}},
+    responses={401: {}, 422: {}},
     dependencies=[Depends(auth_api_key)],
 )
-def post_score(
-    request: Request,
-    miner_input: MinerInput,
-    miner_output: MinerOutput,
-):
+def post_score(request: Request, miner_input: MinerInput, miner_output: MinerOutput):
 
     _request_id = request.state.request_id
-    logger.info(f"[{_request_id}] - Evaluating the miner output...")
+    logger.info(f"[{_request_id}] - Scoring the miner output...")
 
     _score: float = 0.0
     try:
-        _score = service.score(miner_output=miner_output)
-
-        logger.success(f"[{_request_id}] - Successfully evaluated the miner output.")
-    except Exception as err:
-        if isinstance(err, HTTPException):
-            raise
-
-        logger.error(
-            f"[{_request_id}] - Failed to evaluate the miner output!",
+        _score = service.score(request_id=_request_id, miner_output=miner_output)
+        logger.success(
+            f"[{_request_id}] - Successfully scored the miner output: {_score}"
         )
-        raise
 
-    logger.success(f"[{_request_id}] - Successfully scored the miner output: {_score}")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(f"[{_request_id}] - Failed to score the miner output!")
+        raise BaseHTTPException(
+            error_enum=ErrorCodeEnum.INTERNAL_SERVER_ERROR,
+            message="Failed to score the miner output!",
+        )
+
     return _score
 
 
@@ -89,53 +91,75 @@ def _get_web(request: Request):
     _html_response: HTMLResponse
     try:
         _html_response = service.get_web(request=request)
-
         logger.success(f"[{_request_id}] - Successfully got the webpage.")
-    except Exception as err:
-        if isinstance(err, HTTPException):
-            raise
 
-        logger.error(
-            f"[{_request_id}] - Failed to get the webpage!",
-        )
+    except HTTPException:
         raise
+    except Exception:
+        logger.exception(f"[{_request_id}] - Failed to get the webpage!")
+        raise BaseHTTPException(
+            error_enum=ErrorCodeEnum.INTERNAL_SERVER_ERROR,
+            message="Failed to get the webpage!",
+        )
 
     return _html_response
 
 
 @router.post(
-    "/_payload",
-    description="This endpoint posts the human score.",
+    "/_result",
+    summary="Set detection result",
+    description="This endpoint receives the detection result.",
+    response_model=BaseResPM,
     responses={422: {}},
 )
-def post_payload(
+def _post_result(
     request: Request,
-    drivers: dict = Body(..., embed=False),
+    order_id: int = Body(..., ge=0, lt=1000000, examples=[0]),
+    detection_result: DetectionResultPM = Body(
+        ...,
+        examples=[
+            {
+                "botasaurus": False,
+                "camoufox": False,
+                "nodriver": True,
+                "patchright": False,
+                "puppeteerextra": False,
+                "pydoll": False,
+                "seleniumbase": False,
+                "seleniumdriverless": False,
+                "zendriver": False,
+                "human": False,
+            }
+        ],
+    ),
 ):
     _request_id = request.state.request_id
-    logger.info(f"[{_request_id}] - Posting human score...")
+    logger.info(
+        f"[{_request_id}] - Setting detection result as {{'order_id': {order_id}, 'detection_result': {detection_result.model_dump()}}} ..."
+    )
+
     try:
-        service.post_human_score(drivers, _request_id)
-        logger.success(f"[{_request_id}] - Successfully posted human score.")
-    except Exception as err:
-        logger.error(f"[{_request_id}] - Error posting human score: {str(err)}")
-        raise HTTPException(status_code=500, detail="Error in posting human score")
+        service.set_result(
+            request_id=_request_id, order_id=order_id, detection_result=detection_result
+        )
+        logger.success(
+            f"[{_request_id}] - Successfully set detection result as {{'order_id': {order_id}, 'detection_result': {detection_result.model_dump()}}}."
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            f"[{_request_id}] - Failed to set detection result as {{'order_id': {order_id}, 'detection_result': {detection_result.model_dump()}}}!"
+        )
+        raise BaseHTTPException(
+            error_enum=ErrorCodeEnum.INTERNAL_SERVER_ERROR,
+            message="Failed to set detection result!",
+        )
 
-    return
-
-
-@router.get("/results", response_class=JSONResponse)
-def get_results(request: Request):
-    _request_id = request.state.request_id
-    logger.info(f"[{_request_id}] - Getting results...")
-    try:
-        results = service.get_results()
-        logger.success(f"[{_request_id}] - Successfully got results.")
-    except Exception as err:
-        logger.error(f"[{_request_id}] - Error getting results: {str(err)}")
-        raise HTTPException(status_code=500, detail="Error in getting results")
-
-    return JSONResponse(content=results)
+    _response = BaseResponse(
+        request=request, message="Successfully set detection result."
+    )
+    return _response
 
 
 __all__ = ["router"]
